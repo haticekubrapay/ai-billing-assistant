@@ -8,7 +8,7 @@ from bill_service import (
     DuplicateTransaction,
     PaymentExceedsBalance,
     TotalBelowPaidAmount,
-    UsageNotFound,
+    SubscriberNotFound,
     calculate_bill,
     pay_bill,
     query_bill,
@@ -36,8 +36,8 @@ class PayBillRequest(BillPeriod):
 def calculate_bill_endpoint(period: BillPeriod):
     try:
         calculate_bill(period.subscriber_no, period.month, period.year)
-    except UsageNotFound:
-        raise HTTPException(status_code=404, detail="Usage not found.") from None
+    except SubscriberNotFound:
+        raise HTTPException(status_code=404, detail="Subscriber not found.") from None
     except TotalBelowPaidAmount:
         raise HTTPException(
             status_code=409, detail="Calculated total cannot be lower than the paid amount."

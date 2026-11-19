@@ -1,7 +1,7 @@
 import bill_repository
 
 
-class UsageNotFound(Exception):
+class SubscriberNotFound(Exception):
     pass
 
 
@@ -87,7 +87,9 @@ def calculate_bill(subscriber_no: str, month: int, year: int) -> None:
     with bill_repository.connect_billing() as connection:
         usage = bill_repository.lock_monthly_usage(connection, subscriber_no, month, year)
         if usage is None:
-            raise UsageNotFound
+            if not bill_repository.subscriber_exists(connection, subscriber_no):
+                raise SubscriberNotFound
+            usage = (0, 0)
 
         phone_minutes, internet_mb = usage
         total_amount = sum(tariff_charges(phone_minutes, internet_mb).values())

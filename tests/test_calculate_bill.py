@@ -35,15 +35,26 @@ def test_calculate_bill_applies_tariff(database, usage, total):
     assert database.execute.call_args.args[1] == ("1001", 11, 2026, total, *usage)
 
 
-# Test açıklaması: Seçilen dönemde kullanım kaydı yoksa 404 döndüğünü kontrol eder.
-def test_calculate_bill_requires_usage(database):
-    database.execute.return_value.fetchone.return_value = None
+# Test açıklaması: Bilinen abonenin kullanım yapmadığı ay için 50 dolar fatura kaydedilir.
+def test_calculate_bill_charges_base_rate_without_monthly_usage(database):
+    database.execute.return_value.fetchone.side_effect = [None, (True,), (50,)]
+
+    response = client.post(URL, json=PERIOD, headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    assert database.execute.call_args.args[1] == ("1001", 11, 2026, 50, 0, 0)
+
+
+# Test açıklaması: Kullanım veya fatura geçmişi olmayan abone için fatura oluşturulmaz.
+def test_calculate_bill_requires_known_subscriber(database):
+    database.execute.return_value.fetchone.side_effect = [None, (False,)]
 
     response = client.post(URL, json=PERIOD, headers=AUTH)
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "Usage not found."}
-    database.execute.assert_called_once()
+    assert response.json() == {"detail": "Subscriber not found."}
+    assert database.execute.call_count == 2
 
 
 # Test açıklaması: Hesaplanan toplam ödenmiş tutarın altına düşerse 409 döndüğünü kontrol eder.

@@ -31,9 +31,12 @@ to read the saved amount.
 
 The first 1,000 phone minutes are free. Each started block of 1,000 extra
 minutes costs $10. Internet costs $50 through 20 GB, plus $10 per started
-extra 10 GB block (1 GB = 1,000 MB). The $50 base applies to a recorded
-period even if it contains only phone usage. A period without a usage record
-returns HTTP 404. Recalculation preserves payments and returns HTTP 409 if
+extra 10 GB block (1 GB = 1,000 MB). The $50 base applies even in a month
+with zero usage. If the selected month has no usage record, the bill uses zero
+phone minutes and zero MB for a subscriber with an existing usage or bill
+record. This project uses those records to identify known subscribers. A
+subscriber with neither record receives HTTP 404.
+Recalculation preserves payments and returns HTTP 409 if
 the new total would be lower than the amount already paid.
 
 ## Query Bill Detailed
@@ -81,4 +84,4 @@ bill calculation tariff boundaries, and detailed bill authorization,
 paging, legacy invoices, and partial and full payments with failure cases.
 They can run without a PostgreSQL server or a live LLM.
 
-Verified result: `32 passed`.
+Verified result: `33 passed`.

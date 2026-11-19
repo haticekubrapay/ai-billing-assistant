@@ -45,6 +45,19 @@ def lock_monthly_usage(connection, subscriber_no, month, year):
     ).fetchone()
 
 
+def subscriber_exists(connection, subscriber_no: str) -> bool:
+    return connection.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM monthly_usage WHERE subscriber_no = %s
+            UNION ALL
+            SELECT 1 FROM bills WHERE subscriber_no = %s
+        )
+        """,
+        (subscriber_no, subscriber_no),
+    ).fetchone()[0]
+
+
 def save_bill_total(
     connection, subscriber_no, month, year, total_amount, phone_minutes, internet_mb
 ) -> bool:

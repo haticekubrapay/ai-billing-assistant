@@ -85,3 +85,44 @@ paging, legacy invoices, and partial and full payments with failure cases.
 They can run without a PostgreSQL server or a live LLM.
 
 Verified result: `33 passed`.
+
+## Billing guide MCP demo
+
+The MCP server uses the official Python SDK over stdio. At startup, it reads
+the numbered sections of `Mobile_Provider_Billing_Guide.md` and indexes words
+in their headings and text. Heading matches carry more weight. The
+`search_billing_documentation` tool takes a required string `query` and returns
+the guide filename and up to three matches. Each match includes
+`document_id`, `section`, `heading`, and `text`.
+
+From the project directory, set up the MCP environment using Python 3.12:
+
+```sh
+python3.12 -m venv .venv-mcp
+.venv-mcp/bin/python -m pip install -r requirements-mcp.txt
+```
+
+Run the three sample queries or pass a question in quotes:
+
+```sh
+.venv-mcp/bin/python demo_billing_mcp.py
+.venv-mcp/bin/python demo_billing_mcp.py "How much does extra internet cost?"
+```
+
+The client starts the server and prints each tool call, its arguments, and
+the result. The demo runs locally without a database or an LLM.
+
+To type questions in the terminal and see the highest-ranked guide excerpt:
+
+```sh
+.venv-mcp/bin/python demo_billing_mcp.py --interactive
+```
+
+Type an English question, such as `How much does extra internet cost?`.
+Enter `exit` to leave interactive mode.
+
+| Query | Returned sections in order |
+| --- | --- |
+| How much does extra internet cost? | 8.1, 3.2, 2.2 |
+| Can I make a partial payment? | 5.1, 8.3, 5.2 |
+| What is the billing dispute window? | 7.1, 8.4, 4.1 |

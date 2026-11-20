@@ -126,3 +126,53 @@ Enter `exit` to leave interactive mode.
 | How much does extra internet cost? | 8.1, 3.2, 2.2 |
 | Can I make a partial payment? | 5.1, 8.3, 5.2 |
 | What is the billing dispute window? | 7.1, 8.4, 4.1 |
+
+## Local API Gateway
+
+NGINX listens on `127.0.0.1:8080` and forwards the routes below to the
+same paths on FastAPI at `127.0.0.1:8001`. It forwards query parameters,
+JSON request bodies, and the Authorization header. FastAPI validates the
+operator token on protected routes.
+
+| Method | Gateway and FastAPI path | Operator token |
+| --- | --- | --- |
+| GET | `/api/v1/bills/{subscriber_no}` | Not required |
+| GET | `/api/v1/bills/{subscriber_no}/details` | Required |
+| POST | `/api/v1/usage` | Required |
+| POST | `/api/v1/bills/calculate` | Required |
+| POST | `/api/v1/bills/pay` | Required |
+
+Install NGINX with `brew install nginx` on macOS. With PostgreSQL running
+and `schema.sql` applied, start FastAPI using the Uvicorn command above.
+In a second terminal, from the project directory, run:
+
+```sh
+gateway_runtime=$(mktemp -d /tmp/ai-billing-gateway.XXXXXX)
+nginx -e stderr -p "$gateway_runtime/" -c "$PWD/gateway/nginx.conf" -g 'daemon off;'
+```
+
+### Gateway demo evidence
+
+Run these three requests against the local gateway to reproduce the demo:
+
+```sh
+curl -i 'http://127.0.0.1:8080/api/v1/bills/1001?month=10&year=2026'
+detail_url='http://127.0.0.1:8080/api/v1/bills/1001/details?month=10&year=2026'
+curl -i "$detail_url"
+printf 'Authorization: Bearer %s\n' "$(cat .usage-token)" | curl -i -H @- "$detail_url"
+```
+
+| Request | Verified response |
+| --- | --- |
+| Bill summary | HTTP 200 with $75 total, $25 paid, and $50 remaining |
+| Bill details without a token | HTTP 401 with `{"detail":"Invalid or missing operator token."}` |
+| Bill details with a valid token | HTTP 200 with $50 remaining and one `unitemized` charge |
+
+The seeded October bill has no saved usage snapshot, so its charge appears
+as `unitemized`.
+
+All three POST routes were verified through the gateway. Each returned HTTP
+401 without a token. With a valid token, unsupported usage and an invalid
+billing month returned HTTP 422, and an unconfirmed payment returned HTTP 400.
+These requests exercised authentication and JSON handling without modifying
+the sample data.

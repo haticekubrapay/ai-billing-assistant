@@ -176,3 +176,48 @@ All three POST routes were verified through the gateway. Each returned HTTP
 billing month returned HTTP 422, and an unconfirmed payment returned HTTP 400.
 These requests exercised authentication and JSON handling without modifying
 the sample data.
+
+## AI Agent demo
+
+Start the local API and gateway as above. Export `GEMINI_API_KEY` in the
+terminal running the agent, and load the same operator token used by FastAPI
+for the protected details request. After applying `schema.sql`, load the agent
+fixtures into the local demo database. Rerunning the script preserves existing
+bills and payments.
+
+```sh
+psql -h /tmp -d billing -v ON_ERROR_STOP=1 -f demo_agent_data.sql
+export USAGE_OPERATOR_TOKEN="$(cat .usage-token)"
+.venv-mcp/bin/python billing_agent.py "Ek internet ücreti ne kadar?"
+.venv-mcp/bin/python billing_agent.py "Ocak 2027 faturam ne kadar?"
+.venv-mcp/bin/python billing_agent.py "Ocak 2027 faturam neden yüksek?"
+```
+
+| Scenario | Tool trace | Expected result |
+| --- | --- | --- |
+| Policy only | `search_billing_documentation` | Each additional 10 GB block costs $10 past 20 GB (section 3.2). |
+| Bill only | `get_my_bill` | January total $80, paid $0, remaining $80 on a fresh demo database. |
+| Bill and policy | `get_my_bill_details` and `search_billing_documentation` | January's $80 is $50 base internet, $20 internet overage for 35 GB, and $10 phone overage for 1,350 minutes. |
+
+The local demo uses only subscriber `1001`. The original October bill can
+still demonstrate how the agent handles a bill without a usage breakdown.
+
+### Simulated payment
+
+With the same environment and an unpaid balance in the demo database, run:
+
+```sh
+.venv-mcp/bin/python billing_agent.py "Aralık 2026 faturamın kalan borcunun tamamını öde."
+```
+
+The terminal shows the subscriber, billing period, and full remaining amount.
+Type `PAY` to confirm, or press Enter to cancel. The confirmed request updates
+the demo database through the protected gateway route. A full payment leaves
+a zero balance. On a fresh demo database, the December balance starts at $50.
+Try cancellation before confirming. To repeat a successful payment, initialize
+a fresh demo database with the schema and fixtures and point FastAPI at it.
+
+Local verification recorded a confirmed October payment reducing the balance
+from $50 to $0. The January combined flow was checked with simulated Gemini
+responses and live Gateway and MCP calls. Cancelling the December payment
+left its $50 balance available for the live demo.

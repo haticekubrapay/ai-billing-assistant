@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fatura Asistanı</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef3f8; color: #172c43; font: 1rem/1.55 system-ui, sans-serif; }
+  main { width: min(48rem, calc(100% - 2rem)); margin: clamp(1rem, 6vh, 4rem) auto; }
+  header { border-bottom: 1px solid #cadae8; margin-bottom: 1.25rem; padding-bottom: 1rem; }
+  h1 { margin: 0; letter-spacing: -.045em; font-size: clamp(2rem, 6vw, 3rem); }
+  header p { margin: .25rem 0 0; color: #496178; }
+  section { background: #fff; border: 1px solid #cadae8; border-radius: 1rem; overflow: hidden; }
+  #messages { display: grid; gap: .8rem; min-height: 12rem; max-height: 52vh; overflow: auto; padding: 1rem; }
+  .message { width: fit-content; max-width: 96%; margin: 0; padding: .7rem 1rem; border-radius: .8rem; background: #eaf1f8; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .user { justify-self: end; background: #123e62; color: #fff; }
+  .examples, form, .actions { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; }
+  .examples { border-top: 1px solid #e2eaf0; }
+  form { border-top: 1px solid #e2eaf0; }
+  button, input { font: inherit; border: 1px solid #94afc5; border-radius: .55rem; padding: .5rem .75rem; }
+  button { cursor: pointer; background: #fff; color: #173f61; }
+  button:disabled { opacity: .6; cursor: default; }
+  input { flex: 1 1 12rem; min-width: 0; }
+  .primary { background: #145881; color: #fff; border-color: #145881; }
+  .actions { padding: 0; }
+  #status { margin: 0 .95rem .65rem; color: #496178; }
+  .account[hidden] { display: none; }
+  .account { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+  #login-error { margin: 0 1rem .65rem; color: #912d34; }
+  #login-error:empty { display: none; }
+  #status:empty { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Fatura Asistanı</h1>
+    <div class="account" id="account" hidden>
+      <p id="subscriber"></p>
+      <button id="logout" type="button">Çıkış yap</button>
+    </div>
+  </header>
+  <section id="login-panel" aria-label="Demo girişi">
+    <form id="login-form">
+      <input id="password" type="password" autocomplete="current-password" placeholder="Demo şifresi" aria-label="Demo şifresi" required maxlength="256">
+      <button class="primary" type="submit">Giriş yap</button>
+    </form>
+    <p id="login-error" role="status"></p>
+  </section>
+  <section id="chat-panel" aria-label="Fatura sohbeti" hidden>
+    <div id="messages" role="log" aria-label="Mesajlar">
+      <p class="message">Faturan veya kullanım ücretleri hakkında ne öğrenmek istersin?</p>
+    </div>
+    <div class="examples" aria-label="Örnek sorular">
+      <button type="button">Ek internet ücreti ne kadar?</button>
+      <button type="button">Ocak 2027 faturam ne kadar?</button>
+      <button type="button">Ocak 2027 faturam neden yüksek?</button>
+    </div>
+    <form id="chat-form">
+      <input id="question" aria-label="Sorun" placeholder="Sorunu yaz" maxlength="2000" required>
+      <button class="primary" type="submit">Gönder</button>
+    </form>
+    <p id="status" role="status"></p>
+  </section>
+</main>
+<script>
+  const messages = document.querySelector('#messages');
+  const question = document.querySelector('#question');
+  const status = document.querySelector('#status');
+  let busy = false;
+
+  function message(text, user = false) {
+    const row = document.createElement('p');
+    row.className = user ? 'message user' : 'message';
+    row.textContent = text;
+    messages.append(row);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function post(path, data) {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    const result = await response.json();
+    if (response.status === 401 && path !== "/login") showSession(null);
+    if (!response.ok) throw new Error(result.error || 'İstek tamamlanamadı.');
+    return result;
+  }
+
+  function paymentActions(id) {
+    const row = document.createElement('div');
+    row.className = 'actions';
+    for (const [label, confirmed] of [['Ödemeyi onayla', true], ['İptal et', false]]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      if (confirmed) button.className = 'primary';
+      button.addEventListener('click', async () => {
+        row.remove();
+        try {
+          const result = await post('/payment', {id, confirmed});
+          message(result.answer);
+        } catch (error) {
+          message(error.message);
+        }
+      });
+      row.append(button);
+    }
+    messages.append(row);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function send(text) {
+    if (busy || !text) return;
+    busy = true;
+    message(text, true);
+    question.value = '';
+    status.textContent = 'Yanıt hazırlanıyor…';
+    try {
+      const result = await post('/chat', {question: text});
+      message(result.answer);
+      if (result.payment) paymentActions(result.payment);
+    } catch (error) {
+      message(error.message);
+    } finally {
+      busy = false;
+      status.textContent = '';
+      question.focus();
+    }
+  }
+
+  const welcome = messages.firstElementChild.cloneNode(true);
+  function showSession(subscriber) {
+    document.querySelector('#account').hidden = !subscriber;
+    document.querySelector('#chat-panel').hidden = !subscriber;
+    document.querySelector('#login-panel').hidden = Boolean(subscriber);
+    document.querySelector('#subscriber').textContent = subscriber ? `Demo abonesi ${subscriber}` : '';
+    if (!subscriber) messages.replaceChildren(welcome.cloneNode(true));
+  }
+
+  document.querySelector('#login-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const password = document.querySelector('#password');
+    const error = document.querySelector('#login-error');
+    error.textContent = '';
+    try {
+      const result = await post('/login', {password: password.value});
+      showSession(result.subscriber);
+      question.focus();
+    } catch (failure) {
+      error.textContent = failure.message;
+    } finally {
+      password.value = '';
+    }
+  });
+  document.querySelector('#logout').addEventListener('click', async () => {
+    if (busy) return;
+    try {
+      await post('/logout', {});
+      showSession(null);
+    } catch (error) {
+      message(error.message);
+    }
+  });
+  fetch('/session').then(async response => {
+    if (response.ok) showSession((await response.json()).subscriber);
+  }).catch(() => {});
+
+  document.querySelector('#chat-form').addEventListener('submit', event => {
+    event.preventDefault();
+    send(question.value.trim());
+  });
+  document.querySelectorAll('.examples button').forEach(button => {
+    button.addEventListener('click', () => send(button.textContent));
+  });
+</script>
+</body>
+</html>

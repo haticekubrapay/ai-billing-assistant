@@ -5,3 +5,4 @@ __pycache__/
 .pgdata/
 .pgdata.log
 .usage-token
+.billing-service.env

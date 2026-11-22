@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import sys
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -61,11 +62,11 @@ INSTRUCTIONS = (
     "say that the specific cause cannot be determined from that bill. For an "
     "explicit request to pay the full remaining balance, call prepare_bill_payment "
     "with the requested month and year. This demo supports full balance payments only. "
-    "The terminal handles confirmation."
+    "The interface handles confirmation."
 )
 
 
-async def get_my_bill(arguments: dict, *, detailed: bool = False) -> dict:
+async def get_my_bill(arguments: dict, *, detailed: bool = False, subscriber: str = DEMO_SUBSCRIBER) -> dict:
     month, year = arguments.get("month"), arguments.get("year")
     if (
         arguments.keys() != {"month", "year"}
@@ -74,7 +75,7 @@ async def get_my_bill(arguments: dict, *, detailed: bool = False) -> dict:
     ):
         return {"error": "A valid billing month and year are required."}
 
-    path = f"/api/v1/bills/{DEMO_SUBSCRIBER}"
+    path = f"/api/v1/bills/{subscriber}"
     headers = {}
     if detailed:
         token = os.environ.get("USAGE_OPERATOR_TOKEN", "").strip()
@@ -124,6 +125,13 @@ async def pay_with_confirmation(arguments: dict) -> str:
     if confirmation.strip() != "PAY":
         return "Payment cancelled."
 
+    return await submit_payment(arguments, amount)
+
+
+async def submit_payment(arguments: dict, amount: Decimal, *, subscriber: str = DEMO_SUBSCRIBER) -> str:
+    token = os.environ.get("USAGE_OPERATOR_TOKEN", "").strip()
+    if not token:
+        return "Set USAGE_OPERATOR_TOKEN before requesting a simulated payment."
     transaction_id = uuid4().hex
     try:
         async with httpx.AsyncClient(timeout=5, trust_env=False) as client:
@@ -132,7 +140,7 @@ async def pay_with_confirmation(arguments: dict) -> str:
                 headers={"Authorization": f"Bearer {token}"},
                 json={
                     **arguments,
-                    "subscriber_no": DEMO_SUBSCRIBER,
+                    "subscriber_no": subscriber,
                     "amount": str(amount),
                     "transaction_id": transaction_id,
                     "confirmed": True,
@@ -150,7 +158,11 @@ async def pay_with_confirmation(arguments: dict) -> str:
     return f"Simulated payment recorded. Remaining balance: ${remaining:.2f}."
 
 
-async def ask(question: str) -> str:
+async def ask(
+    question: str,
+    payment_handler: Callable[[dict], Awaitable[str]] = pay_with_confirmation,
+    *, subscriber: str = DEMO_SUBSCRIBER,
+) -> str:
     server = StdioServerParameters(
         command=sys.executable,
         args=[str(Path(__file__).with_name("billing_mcp_server.py"))],
@@ -188,11 +200,11 @@ async def ask(question: str) -> str:
                 name = call["name"]
                 print("Tool call:", json.dumps(call, ensure_ascii=False))
                 if name == BILL_TOOL:
-                    output = await get_my_bill(arguments)
+                    output = await get_my_bill(arguments, subscriber=subscriber)
                 elif name == DETAIL_TOOL:
-                    output = await get_my_bill(arguments, detailed=True)
+                    output = await get_my_bill(arguments, detailed=True, subscriber=subscriber)
                 elif name == PAYMENT_TOOL:
-                    return await pay_with_confirmation(arguments)
+                    return await payment_handler(arguments)
                 elif name == SEARCH_TOOL and isinstance(arguments.get("query"), str):
                     result = await session.call_tool(SEARCH_TOOL, arguments)
                     output = result.structuredContent

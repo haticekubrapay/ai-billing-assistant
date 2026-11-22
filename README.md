@@ -349,6 +349,39 @@ now writes its access log to `/run/billing-gateway/access.log` when running
 under systemd. Export the operator token and Gemini API key in the agent's SSH
 session, then run the scenarios in **AI Agent demo**.
 
+### Public HTTPS Gateway
+
+Gateway base URL: `https://16.171.142.50`. The EC2 security group allows
+public inbound TCP 80 and 443 for certificate validation and HTTPS. The
+public NGINX listener forwards all five `/api/v1/` routes to the billing
+gateway on `127.0.0.1:8080`. The API, database, and chat processes use
+private access. The public bill summary serves fictitious demo data.
+
+```sh
+curl -i 'https://16.171.142.50/api/v1/bills/1001?month=1&year=2027'
+curl -i 'https://16.171.142.50/api/v1/bills/1001/details?month=1&year=2027'
+```
+
+Both requests were verified externally with certificate validation enabled.
+The summary returned HTTP 200 with an $80 total. The protected details route
+returned HTTP 401 with `{"detail":"Invalid or missing operator token."}`.
+HTTP requests to the IP redirect to HTTPS.
+
+To reproduce the TLS setup with the EC2 public IP, install Certbot with
+`sudo snap install --classic certbot`. Issue an IP certificate using the
+Let’s Encrypt `shortlived` profile, Certbot’s `--webroot` method, webroot
+`/var/www/html`, and `--ip-address` set to the public IP. Configure the
+public NGINX site to serve `/.well-known/acme-challenge/` from that webroot
+on port 80, redirect other HTTP traffic to HTTPS, and use
+`/etc/letsencrypt/live/<public-ip>/fullchain.pem` and `privkey.pem` on
+port 443. Proxy `/api/v1/` to `http://127.0.0.1:8080` and forward the
+Authorization header.
+
+The Certbot renewal timer is active. A deploy hook named `reload-nginx` in
+`/etc/letsencrypt/renewal-hooks/deploy/` runs `systemctl reload nginx`
+after renewal. The URL uses the instance’s auto-assigned public IP. If that
+IP changes, update the certificate, NGINX site, and the URL above.
+
 ### Browser demo
 
 In the EC2 project directory, with `GEMINI_API_KEY` and
@@ -376,5 +409,5 @@ The demo uses one server process and is intended for SSH-forwarded access.
 For a simulated payment, ask to pay the full December 2026 balance. Review
 the period and amount, then confirm or cancel in the browser. The demo
 uses the same server-side agent and gateway as the terminal client.
-This SSH-forwarded UI is for the demo operator. A public gateway URL
-still needs a separate deployment configuration.
+The browser demo is available to the demo operator over the SSH tunnel.
+The public Gateway URL above can be used independently to verify REST routes.

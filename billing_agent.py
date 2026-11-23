@@ -3,7 +3,8 @@ import asyncio
 import json
 import os
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -11,6 +12,7 @@ from uuid import uuid4
 import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.types import Tool
 
 from check_gemini import answer_text, generate_content
 
@@ -158,11 +160,8 @@ async def submit_payment(arguments: dict, amount: Decimal, *, subscriber: str = 
     return f"Simulated payment recorded. Remaining balance: ${remaining:.2f}."
 
 
-async def ask(
-    question: str,
-    payment_handler: Callable[[dict], Awaitable[str]] = pay_with_confirmation,
-    *, subscriber: str = DEMO_SUBSCRIBER,
-) -> str:
+@asynccontextmanager
+async def open_billing_mcp() -> AsyncIterator[tuple[ClientSession, Tool]]:
     server = StdioServerParameters(
         command=sys.executable,
         args=[str(Path(__file__).with_name("billing_mcp_server.py"))],
@@ -171,55 +170,70 @@ async def ask(
         await session.initialize()
         tools = await session.list_tools()
         guide_tool = next(tool for tool in tools.tools if tool.name == SEARCH_TOOL)
-        payload = {
-            "systemInstruction": {"parts": [{"text": INSTRUCTIONS}]},
-            "contents": [{"role": "user", "parts": [{"text": question}]}],
-            "tools": [{"functionDeclarations": [{
-                "name": guide_tool.name,
-                "description": guide_tool.description,
-                "parametersJsonSchema": guide_tool.inputSchema,
-            }, BILL_DECLARATION, DETAIL_DECLARATION, PAYMENT_DECLARATION]}],
-            "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
-        }
-        for round_number in range(4):
-            if round_number == 3:
-                payload["toolConfig"]["functionCallingConfig"]["mode"] = "NONE"
-            choice = generate_content(payload)
-            calls = [part["functionCall"] for part in choice["parts"] if "functionCall" in part]
-            if not calls:
-                if round_number == 0:
-                    print("Tool call: none")
-                return answer_text(choice)
+        print("Billing MCP ready")
+        yield session, guide_tool
 
-            if round_number == 3:
-                return "The agent reached its tool-call limit."
 
-            responses = []
-            for call in calls:
-                arguments = call.get("args", {})
-                name = call["name"]
-                print("Tool call:", json.dumps(call, ensure_ascii=False))
-                if name == BILL_TOOL:
-                    output = await get_my_bill(arguments, subscriber=subscriber)
-                elif name == DETAIL_TOOL:
-                    output = await get_my_bill(arguments, detailed=True, subscriber=subscriber)
-                elif name == PAYMENT_TOOL:
-                    return await payment_handler(arguments)
-                elif name == SEARCH_TOOL and isinstance(arguments.get("query"), str):
-                    result = await session.call_tool(SEARCH_TOOL, arguments)
-                    output = result.structuredContent
-                    if result.isError or output is None:
-                        output = {"error": "The MCP guide search failed."}
-                else:
-                    output = {"error": "Unknown tool or invalid arguments."}
-                print("Tool result:", json.dumps(output, ensure_ascii=False, indent=2))
-                response = {"name": name, "response": output}
-                if "id" in call:
-                    response["id"] = call["id"]
-                responses.append({"functionResponse": response})
+async def ask(
+    question: str,
+    payment_handler: Callable[[dict], Awaitable[str]] = pay_with_confirmation,
+    *, subscriber: str = DEMO_SUBSCRIBER,
+    mcp: tuple[ClientSession, Tool] | None = None,
+) -> str:
+    if mcp is None:
+        async with open_billing_mcp() as connection:
+            return await ask(question, payment_handler, subscriber=subscriber, mcp=connection)
 
-            # Keep Gemini's original parts, including any thought signatures.
-            payload["contents"].extend([choice, {"role": "user", "parts": responses}])
+    session, guide_tool = mcp
+    payload = {
+        "systemInstruction": {"parts": [{"text": INSTRUCTIONS}]},
+        "contents": [{"role": "user", "parts": [{"text": question}]}],
+        "tools": [{"functionDeclarations": [{
+            "name": guide_tool.name,
+            "description": guide_tool.description,
+            "parametersJsonSchema": guide_tool.inputSchema,
+        }, BILL_DECLARATION, DETAIL_DECLARATION, PAYMENT_DECLARATION]}],
+        "toolConfig": {"functionCallingConfig": {"mode": "AUTO"}},
+    }
+    for round_number in range(4):
+        if round_number == 3:
+            payload["toolConfig"]["functionCallingConfig"]["mode"] = "NONE"
+        choice = await asyncio.to_thread(generate_content, payload)
+        calls = [part["functionCall"] for part in choice["parts"] if "functionCall" in part]
+        if not calls:
+            if round_number == 0:
+                print("Tool call: none")
+            return answer_text(choice)
+
+        if round_number == 3:
+            return "The agent reached its tool-call limit."
+
+        responses = []
+        for call in calls:
+            arguments = call.get("args", {})
+            name = call["name"]
+            print("Tool call:", json.dumps(call, ensure_ascii=False))
+            if name == BILL_TOOL:
+                output = await get_my_bill(arguments, subscriber=subscriber)
+            elif name == DETAIL_TOOL:
+                output = await get_my_bill(arguments, detailed=True, subscriber=subscriber)
+            elif name == PAYMENT_TOOL:
+                return await payment_handler(arguments)
+            elif name == SEARCH_TOOL and isinstance(arguments.get("query"), str):
+                result = await session.call_tool(SEARCH_TOOL, arguments)
+                output = result.structuredContent
+                if result.isError or output is None:
+                    output = {"error": "The MCP guide search failed."}
+            else:
+                output = {"error": "Unknown tool or invalid arguments."}
+            print("Tool result:", json.dumps(output, ensure_ascii=False, indent=2))
+            response = {"name": name, "response": output}
+            if "id" in call:
+                response["id"] = call["id"]
+            responses.append({"functionResponse": response})
+
+        # Keep Gemini's original parts, including any thought signatures.
+        payload["contents"].extend([choice, {"role": "user", "parts": responses}])
 
 
 if __name__ == "__main__":

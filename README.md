@@ -265,12 +265,28 @@ from $50 to $0. The January combined flow was checked with simulated Gemini
 responses and live Gateway and MCP calls. Cancelling the December payment
 left its $50 balance available for the live demo.
 
+### Gemini API costs and testing without Gemini
+
+The CLI agent and browser chat use `gemini-3.1-flash-lite`. Eligible Gemini
+API projects can run the live demo within Google's free-tier limits. As of
+November 23, 2026, Google's standard paid rates for this demo are USD 0.25
+per million text input tokens and USD 1.50 per million output tokens, including
+thinking tokens. A chat question can trigger multiple model calls when the
+agent uses tools, so its cost depends on the total tokens across those calls.
+See [Google's Gemini API pricing](https://aistudio.google.com/docs/pricing#gemini-3.1-flash-lite)
+for current rates.
+
+To test without a Gemini API key or Gemini usage charges, run
+`.venv-mcp/bin/python demo_billing_mcp.py` for the three guide searches and
+`.venv/bin/python -m pytest -q` for the REST tests.
+
 ## AWS EC2 deployment
 
 The verified deployment runs on one Ubuntu 24.04 LTS EC2 instance in Stockholm
 (`eu-north-1`). PostgreSQL, FastAPI, and the NGINX gateway run on the instance.
-The Gemini agent starts its MCP server on demand as a separate stdio process
-on the same instance. The agent's REST requests use the gateway at
+The browser demo starts one MCP stdio subprocess when the web server starts
+and reuses its index for all chat requests. The single-question CLI starts
+its own MCP subprocess on the same instance. The agent's REST requests use the gateway at
 `http://127.0.0.1:8080`, reachable from an SSH session on the instance.
 
 On the EC2 host, install `python3-venv`, `postgresql`, and `nginx` with
@@ -406,6 +422,9 @@ The server maps the authenticated session to subscriber `1001`. It uses
 that mapping for account requests and binds payment confirmation to the
 session that requested it. Sessions expire after an hour or on server restart.
 The demo uses one server process and is intended for SSH-forwarded access.
+To show that the guide index is reused, look for one `Billing MCP ready`
+startup line, then ask two different policy questions and show both
+`search_billing_documentation` calls in the same server log.
 For a simulated payment, ask to pay the full December 2026 balance. Review
 the period and amount, then confirm or cancel in the browser. The demo
 uses the same server-side agent and gateway as the terminal client.

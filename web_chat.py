@@ -1,5 +1,5 @@
-import asyncio
 import os
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from secrets import compare_digest
@@ -13,13 +13,19 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
-from billing_agent import DEMO_SUBSCRIBER, ask, get_my_bill, submit_payment
+from billing_agent import DEMO_SUBSCRIBER, ask, get_my_bill, open_billing_mcp, submit_payment
 
 
 SESSION_COOKIE = "billing_session"
 SESSION_SECONDS = 3600
 sessions: dict[str, tuple[float, str]] = {}
 pending: dict[str, tuple[float, str, dict, Decimal]] = {}
+
+
+@asynccontextmanager
+async def lifespan(app: Starlette):
+    async with open_billing_mcp() as mcp:
+        yield {"billing_mcp": mcp}
 
 
 def current_session(request: Request) -> tuple[str, str] | None:
@@ -119,12 +125,9 @@ async def chat(request: Request) -> JSONResponse:
     if not os.environ.get("GEMINI_API_KEY", "").strip():
         return JSONResponse({"error": "Sunucuda GEMINI_API_KEY tanımlı olmalı."}, status_code=503)
     try:
-        answer = await asyncio.to_thread(lambda: asyncio.run(ask(question.strip(), prepare, subscriber=subscriber)))
-    except BaseExceptionGroup as error:
-        failures = error.split(SystemExit)
-        if failures[1] is not None:
-            raise
-        return JSONResponse({"error": "Gemini yanıtı alınamadı. Sunucu ayarlarını kontrol et."}, status_code=502)
+        answer = await ask(
+            question.strip(), prepare, subscriber=subscriber, mcp=request.state.billing_mcp
+        )
     except SystemExit as error:
         return JSONResponse({"error": str(error)}, status_code=502)
     payment_id = None
@@ -165,6 +168,7 @@ async def payment(request: Request) -> JSONResponse:
 
 
 app = Starlette(
+    lifespan=lifespan,
     routes=[
         Route("/", home),
         Route("/session", session_status),

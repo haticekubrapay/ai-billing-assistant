@@ -6,6 +6,10 @@ see what caused extra charges, and confirm a simulated payment. The assistant
 retrieves policy information through MCP and reads billing records through a
 REST API. To explain a specific charge, it combines both sources.
 
+## Demonstration Video
+
+[Watch the demo on Google Drive](https://drive.google.com/file/d/1VWfZQHFZLBWBD38UBQXhM96rx9u5SJxE/view?usp=sharing)
+
 ## Architecture and API specification
 
 The browser and terminal run the billing agent, which asks Gemini to select

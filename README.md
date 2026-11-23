@@ -1,5 +1,11 @@
 # AI Billing Support Assistant
 
+AI Billing Support Assistant is a chat application for a fictional mobile
+provider. A demo subscriber can ask about pricing rules, check a monthly bill,
+see what caused extra charges, and confirm a simulated payment. The assistant
+retrieves policy information through MCP and reads billing records through a
+REST API. To explain a specific charge, it combines both sources.
+
 ## Architecture and API specification
 
 The browser and terminal run the billing agent, which asks Gemini to select
